@@ -9,4 +9,5 @@ foreach (test_source ${TEST_SOURCES})
 
     # Add the test target separately and as part of "make check-tests".
     add_executable(${bustub_test_name} EXCLUDE_FROM_ALL ${test_source})
+    target_link_libraries(${bustub_test_name} pmqtt_shared)
 endforeach(test_source ${test_sourceS})

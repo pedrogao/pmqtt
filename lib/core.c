@@ -46,19 +46,19 @@ void topic_del_subscriber(struct topic *t,
     // TODO remomve in case of cleansession == false
 }
 
-void p_topic_put(struct sol *sol, struct topic *t)
+void p_topic_put(p_mq *mq, struct topic *t)
 {
-    trie_insert(&sol->topics, t->name, t);
+    trie_insert(&mq->topics, t->name, t);
 }
 
-void p_topic_del(struct sol *sol, const char *name)
+void p_topic_del(p_mq *mq, const char *name)
 {
-    trie_delete(&sol->topics, name);
+    trie_delete(&mq->topics, name);
 }
 
-struct topic *p_topic_get(struct sol *sol, const char *name)
+struct topic *p_topic_get(p_mq *mq, const char *name)
 {
     struct topic *ret_topic;
-    trie_find(&sol->topics, name, (void *)&ret_topic);
+    trie_find(&mq->topics, name, (void *)&ret_topic);
     return ret_topic;
 }

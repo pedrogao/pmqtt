@@ -247,7 +247,7 @@ int config_load(const char *configpath)
     if (!fh)
     {
         p_warning("WARNING: Unable to open conf file %s", configpath);
-        p_warning("To specify a config file run sol -c /path/to/conf");
+        p_warning("To specify a config file run pmq -c /path/to/conf");
         return false;
     }
 
@@ -334,7 +334,7 @@ void config_print(void)
             if (lmap[i].loglevel == config.loglevel)
                 llevel = lmap[i].lname;
         }
-        p_info("Sol v%s is starting", VERSION);
+        p_info("PMQ v%s is starting", VERSION);
         p_info("Network settings:");
         p_info("\tSocket family: %s", sfamily);
         if (config.socket_family == UNIX)

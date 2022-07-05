@@ -14,7 +14,7 @@
 #include "server.h"
 #include "hashtable.h"
 
-/* Seconds in a Sol, easter egg */
+/* Seconds in a PMQ, easter egg */
 static const double p_SECONDS = 88775.24;
 
 /*
@@ -24,7 +24,7 @@ static const double p_SECONDS = 88775.24;
 static struct p_info info;
 
 /* Broker global instance, contains the topic trie and the clients hashtable */
-static struct sol sol;
+static p_mq pmq;
 
 /*
  * Statistics topics, published every N seconds defined by configuration
@@ -33,20 +33,21 @@ static struct sol sol;
 #define SYS_TOPICS 14
 
 static const char *sys_topics[SYS_TOPICS] = {
-    "$SOL/",
-    "$SOL/broker/",
-    "$SOL/broker/clients/",
-    "$SOL/broker/bytes/",
-    "$SOL/broker/messages/",
-    "$SOL/broker/uptime/",
-    "$SOL/broker/uptime/sol",
-    "$SOL/broker/clients/connected/",
-    "$SOL/broker/clients/disconnected/",
-    "$SOL/broker/bytes/sent/",
-    "$SOL/broker/bytes/received/",
-    "$SOL/broker/messages/sent/",
-    "$SOL/broker/messages/received/",
-    "$SOL/broker/memory/used"};
+    "$PMQ/",
+    "$PMQ/broker/",
+    "$PMQ/broker/clients/",
+    "$PMQ/broker/bytes/",
+    "$PMQ/broker/messages/",
+    "$PMQ/broker/uptime/",
+    "$PMQ/broker/uptime/pmq",
+    "$PMQ/broker/clients/connected/",
+    "$PMQ/broker/clients/disconnected/",
+    "$PMQ/broker/bytes/sent/",
+    "$PMQ/broker/bytes/received/",
+    "$PMQ/broker/messages/sent/",
+    "$PMQ/broker/messages/received/",
+    "$PMQ/broker/memory/used",
+};
 
 /* Prototype for a command handler */
 typedef int handler(struct closure *, union mqtt_packet *);
@@ -197,7 +198,7 @@ static int connect_handler(struct closure *cb, union mqtt_packet *pkt)
 {
 
     // TODO just return error_code and handle it on `on_read`
-    if (hashtable_exists(sol.clients,
+    if (hashtable_exists(pmq.clients,
                          (const char *)pkt->connect.payload.client_id))
     {
 
@@ -205,11 +206,11 @@ static int connect_handler(struct closure *cb, union mqtt_packet *pkt)
         // a violation of the protocol, causing disconnection of the client
 
         p_info("Received double CONNECT from %s, disconnecting client",
-                 pkt->connect.payload.client_id);
+               pkt->connect.payload.client_id);
 
         close(cb->fd);
-        hashtable_del(sol.clients, (const char *)pkt->connect.payload.client_id);
-        hashtable_del(sol.closures, cb->closure_id);
+        hashtable_del(pmq.clients, (const char *)pkt->connect.payload.client_id);
+        hashtable_del(pmq.closures, cb->closure_id);
 
         // Update stats
         info.nclients--;
@@ -219,9 +220,9 @@ static int connect_handler(struct closure *cb, union mqtt_packet *pkt)
     }
 
     p_info("New client connected as %s (c%i, k%u)",
-             pkt->connect.payload.client_id,
-             pkt->connect.bits.clean_session,
-             pkt->connect.payload.keepalive);
+           pkt->connect.payload.client_id,
+           pkt->connect.bits.clean_session,
+           pkt->connect.payload.keepalive);
 
     /*
      * Add the new connected client to the global map, if it is already
@@ -232,7 +233,7 @@ static int connect_handler(struct closure *cb, union mqtt_packet *pkt)
     const char *cid = (const char *)pkt->connect.payload.client_id;
     new_client->client_id = p_strdup(cid);
     buffer_create(&new_client->buf);
-    hashtable_put(sol.clients, cid, new_client);
+    hashtable_put(pmq.clients, cid, new_client);
 
     /* Substitute fd on callback with closure */
     cb->obj = new_client;
@@ -258,8 +259,8 @@ static int connect_handler(struct closure *cb, union mqtt_packet *pkt)
     p_free(p);
 
     p_debug("Sending CONNACK to %s (%u, %u)",
-              pkt->connect.payload.client_id,
-              session_present, rc);
+            pkt->connect.payload.client_id,
+            session_present, rc);
 
     p_free(response);
 
@@ -277,8 +278,8 @@ static int disconnect_handler(struct closure *cb, union mqtt_packet *pkt)
     p_debug("Received DISCONNECT from %s", c->client_id);
 
     close(c->fd);
-    hashtable_del(sol.clients, c->client_id);
-    hashtable_del(sol.closures, cb->closure_id);
+    hashtable_del(pmq.clients, c->client_id);
+    hashtable_del(pmq.closures, cb->closure_id);
 
     // Update stats
     info.nclients--;
@@ -345,21 +346,21 @@ static int subscribe_handler(struct closure *cb, union mqtt_packet *pkt)
             alloced = true;
         }
 
-        struct topic *t = p_topic_get(&sol, topic);
+        struct topic *t = p_topic_get(&pmq, topic);
 
         // TODO check for callback correctly set to obj
 
         if (!t)
         {
             t = topic_create(p_strdup(topic));
-            p_topic_put(&sol, t);
+            p_topic_put(&pmq, t);
         }
         else if (wildcard == true)
         {
             struct subscriber *sub = p_malloc(sizeof(*sub));
             sub->client = cb->obj;
             sub->qos = pkt->subscribe.tuples[i].qos;
-            trie_prefix_map_tuple(&sol.topics, topic,
+            trie_prefix_map_tuple(&pmq.topics, topic,
                                   recursive_subscription, sub);
         }
 
@@ -418,13 +419,13 @@ static int publish_handler(struct closure *cb, union mqtt_packet *pkt)
     struct p_client *c = cb->obj;
 
     p_debug("Received PUBLISH from %s (d%i, q%u, r%i, m%u, %s, ... (%i bytes))",
-              c->client_id,
-              pkt->publish.header.bits.dup,
-              pkt->publish.header.bits.qos,
-              pkt->publish.header.bits.retain,
-              pkt->publish.pkt_id,
-              pkt->publish.topic,
-              pkt->publish.payloadlen);
+            c->client_id,
+            pkt->publish.header.bits.dup,
+            pkt->publish.header.bits.qos,
+            pkt->publish.header.bits.retain,
+            pkt->publish.pkt_id,
+            pkt->publish.topic,
+            pkt->publish.payloadlen);
 
     info.messages_recv++;
 
@@ -446,12 +447,12 @@ static int publish_handler(struct closure *cb, union mqtt_packet *pkt)
      * Retrieve the topic from the global map, if it wasn't created before,
      * create a new one with the name selected
      */
-    struct topic *t = p_topic_get(&sol, topic);
+    struct topic *t = p_topic_get(&pmq, topic);
 
     if (!t)
     {
         t = topic_create(p_strdup(topic));
-        p_topic_put(&sol, t);
+        p_topic_put(&pmq, t);
     }
 
     // Not the best way to handle this
@@ -482,19 +483,19 @@ static int publish_handler(struct closure *cb, union mqtt_packet *pkt)
         ssize_t sent;
         if ((sent = send_bytes(sc->fd, pub, publen)) < 0)
             p_error("Error publishing to %s: %s",
-                      sc->client_id, strerror(errno));
+                    sc->client_id, strerror(errno));
 
         // Update information stats
         info.bytes_sent += sent;
 
         p_debug("Sending PUBLISH to %s (d%i, q%u, r%i, m%u, %s, ... (%i bytes))",
-                  sc->client_id,
-                  pkt->publish.header.bits.dup,
-                  pkt->publish.header.bits.qos,
-                  pkt->publish.header.bits.retain,
-                  pkt->publish.pkt_id,
-                  pkt->publish.topic,
-                  pkt->publish.payloadlen);
+                sc->client_id,
+                pkt->publish.header.bits.dup,
+                pkt->publish.header.bits.qos,
+                pkt->publish.header.bits.retain,
+                pkt->publish.pkt_id,
+                pkt->publish.topic,
+                pkt->publish.payloadlen);
 
         info.messages_sent++;
 
@@ -556,7 +557,7 @@ static int puback_handler(struct closure *cb, union mqtt_packet *pkt)
 {
 
     p_debug("Received PUBACK from %s",
-              ((struct p_client *)cb->obj)->client_id);
+            ((struct p_client *)cb->obj)->client_id);
 
     // TODO Remove from pending PUBACK clients map
 
@@ -588,7 +589,7 @@ static int pubrel_handler(struct closure *cb, union mqtt_packet *pkt)
 {
 
     p_debug("Received PUBREL from %s",
-              ((struct p_client *)cb->obj)->client_id);
+            ((struct p_client *)cb->obj)->client_id);
 
     mqtt_pubcomp *pubcomp = mqtt_packet_ack(PUBCOMP_BYTE, pkt->publish.pkt_id);
 
@@ -600,7 +601,7 @@ static int pubrel_handler(struct closure *cb, union mqtt_packet *pkt)
     p_free(packed);
 
     p_debug("Sending PUBCOMP to %s",
-              ((struct p_client *)cb->obj)->client_id);
+            ((struct p_client *)cb->obj)->client_id);
 
     return REARM_W;
 }
@@ -609,7 +610,7 @@ static int pubcomp_handler(struct closure *cb, union mqtt_packet *pkt)
 {
 
     p_debug("Received PUBCOMP from %s",
-              ((struct p_client *)cb->obj)->client_id);
+            ((struct p_client *)cb->obj)->client_id);
 
     // TODO Remove from pending PUBACK clients map
 
@@ -620,7 +621,7 @@ static int pingreq_handler(struct closure *cb, union mqtt_packet *pkt)
 {
 
     p_debug("Received PINGREQ from %s",
-              ((struct p_client *)cb->obj)->client_id);
+            ((struct p_client *)cb->obj)->client_id);
 
     pkt->header = *mqtt_packet_header(PINGRESP_BYTE);
     unsigned char *packed = pack_mqtt_packet(pkt, PINGRESP);
@@ -629,7 +630,7 @@ static int pingreq_handler(struct closure *cb, union mqtt_packet *pkt)
     p_free(packed);
 
     p_debug("Sending PINGRESP to %s",
-              ((struct p_client *)cb->obj)->client_id);
+            ((struct p_client *)cb->obj)->client_id);
 
     return REARM_W;
 }
@@ -652,7 +653,7 @@ static void on_write(struct evloop *loop, void *arg)
         /* Check if there's still some remaning bytes to send out */
         if ((sent = send_bytes(cb->fd, c->buf.bytes + c->buf.start, c->buf.end)) < 0)
             p_error("Error writing on socket to client %s: %s",
-                      ((struct p_client *)cb->obj)->client_id, strerror(errno));
+                    ((struct p_client *)cb->obj)->client_id, strerror(errno));
 
         /* Update buffer pointers */
         c->buf.start += sent;
@@ -660,7 +661,7 @@ static void on_write(struct evloop *loop, void *arg)
 
     if ((sent = send_bytes(cb->fd, cb->payload->data, cb->payload->size)) < 0)
         p_error("Error writing on socket to client %s: %s",
-                  ((struct p_client *)cb->obj)->client_id, strerror(errno));
+                ((struct p_client *)cb->obj)->client_id, strerror(errno));
 
     /* Update client buffer for remaining bytes to send */
     if (sent < cb->payload->size)
@@ -764,8 +765,8 @@ errdc:
     shutdown(cb->fd, 0);
     close(cb->fd);
 
-    hashtable_del(sol.clients, ((struct p_client *)cb->obj)->client_id);
-    hashtable_del(sol.closures, cb->closure_id);
+    hashtable_del(pmq.clients, ((struct p_client *)cb->obj)->client_id);
+    hashtable_del(pmq.closures, cb->closure_id);
 
     info.nclients--;
 
@@ -840,7 +841,7 @@ static void on_accept(struct evloop *loop, void *arg)
     client_closure->call = on_read;
     generate_uuid(client_closure->closure_id);
 
-    hashtable_put(sol.closures, client_closure->closure_id, client_closure);
+    hashtable_put(pmq.closures, client_closure->closure_id, client_closure);
 
     /* Add it to the epoll loop */
     evloop_add_callback(loop, client_closure);
@@ -872,7 +873,7 @@ static void publish_message(unsigned short pkt_id,
 {
 
     /* Retrieve the Topic structure from the global map, exit if not found */
-    struct topic *t = p_topic_get(&sol, topic);
+    struct topic *t = p_topic_get(&pmq, topic);
 
     if (!t)
         return;
@@ -898,12 +899,12 @@ static void publish_message(unsigned short pkt_id,
     {
 
         p_debug("Sending PUBLISH (d%i, q%u, r%i, m%u, %s, ... (%i bytes))",
-                  pkt.publish.header.bits.dup,
-                  pkt.publish.header.bits.qos,
-                  pkt.publish.header.bits.retain,
-                  pkt.publish.pkt_id,
-                  pkt.publish.topic,
-                  pkt.publish.payloadlen);
+                pkt.publish.header.bits.dup,
+                pkt.publish.header.bits.qos,
+                pkt.publish.header.bits.retain,
+                pkt.publish.pkt_id,
+                pkt.publish.topic,
+                pkt.publish.payloadlen);
 
         len = MQTT_HEADER_LEN + sizeof(uint16_t) +
               pkt.publish.topiclen + pkt.publish.payloadlen;
@@ -921,7 +922,7 @@ static void publish_message(unsigned short pkt_id,
 
         if ((sent = send_bytes(sc->fd, packed, len)) < 0)
             p_error("Error publishing to %s: %s",
-                      sc->client_id, strerror(errno));
+                    sc->client_id, strerror(errno));
 
         // Update information stats
         info.bytes_sent += sent;
@@ -1025,10 +1026,10 @@ static int closure_destructor(struct hashtable_entry *entry)
 int start_server(const char *addr, const char *port)
 {
 
-    /* Initialize global Sol instance */
-    trie_init(&sol.topics);
-    sol.clients = hashtable_create(client_destructor);
-    sol.closures = hashtable_create(closure_destructor);
+    /* Initialize global PMQ instance */
+    trie_init(&pmq.topics);
+    pmq.clients = hashtable_create(client_destructor);
+    pmq.closures = hashtable_create(closure_destructor);
 
     struct closure server_closure;
 
@@ -1041,7 +1042,7 @@ int start_server(const char *addr, const char *port)
 
     /* Generate stats topics */
     for (int i = 0; i < SYS_TOPICS; i++)
-        p_topic_put(&sol, topic_create(p_strdup(sys_topics[i])));
+        p_topic_put(&pmq, topic_create(p_strdup(sys_topics[i])));
 
     struct evloop *event_loop = evloop_create(EPOLL_MAX_EVENTS, EPOLL_TIMEOUT);
 
@@ -1067,10 +1068,10 @@ int start_server(const char *addr, const char *port)
 
     run(event_loop);
 
-    hashtable_release(sol.clients);
-    hashtable_release(sol.closures);
+    hashtable_release(pmq.clients);
+    hashtable_release(pmq.closures);
 
-    p_info("Sol v%s exiting", VERSION);
+    p_info("PMQ v%s exiting", VERSION);
 
     return 0;
 }

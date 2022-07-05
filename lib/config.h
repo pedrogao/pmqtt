@@ -8,8 +8,8 @@
 #define VERSION "0.0.1"
 #define DEFAULT_SOCKET_FAMILY INET
 #define DEFAULT_LOG_LEVEL DEBUG
-#define DEFAULT_LOG_PATH "/tmp/sol.log"
-#define DEFAULT_CONF_PATH "/etc/sol/sol.conf"
+#define DEFAULT_LOG_PATH "/tmp/pmq.log"
+#define DEFAULT_CONF_PATH "/etc/pmq/pmq.conf"
 #define DEFAULT_HOSTNAME "127.0.0.1"
 #define DEFAULT_PORT "1883"
 #define DEFAULT_MAX_MEMORY "2GB"
@@ -18,7 +18,7 @@
 
 struct config
 {
-    /* Sol version <MAJOR.MINOR.PATCH> */
+    /* PMQ version <MAJOR.MINOR.PATCH> */
     const char *version;
     /* Eventfd to break the epoll_wait loop in case of signals */
     int run;

@@ -16,12 +16,12 @@ struct topic
  * Main structure, a global instance will be instantiated at start, tracking
  * topics, connected clients and registered closures.
  */
-struct sol
+typedef struct _p_mq
 {
     HashTable *clients;
     HashTable *closures;
     Trie topics;
-};
+} p_mq;
 
 struct session
 {
@@ -55,11 +55,11 @@ void topic_add_subscriber(struct topic *, struct p_client *, unsigned, bool);
 
 void topic_del_subscriber(struct topic *, struct p_client *, bool);
 
-void p_topic_put(struct sol *, struct topic *);
+void p_topic_put(p_mq *, struct topic *);
 
-void p_topic_del(struct sol *, const char *);
+void p_topic_del(p_mq *, const char *);
 
 /* Find a topic by name and return it */
-struct topic *p_topic_get(struct sol *, const char *);
+struct topic *p_topic_get(p_mq *, const char *);
 
 #endif
